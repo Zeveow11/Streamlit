@@ -3,3 +3,5 @@ plotly
 pandas
 matplotlib
 requests
+folium
+streamlit-folium
