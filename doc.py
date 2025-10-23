@@ -1,247 +1,199 @@
 import streamlit as st
-import plotly.express as px
+import folium
+from streamlit_folium import st_folium
 import pandas as pd
-import json
-import requests
 
-st.set_page_config(page_title="Kazakhstan Regions Map", page_icon="🗺️", layout="wide")
+st.set_page_config(page_title="Kazakhstan Map", page_icon="🗺️", layout="wide")
 
 st.title("🗺️ Kazakhstan Regional Map")
-st.markdown("### Interactive map showing all regions (oblasts) of Kazakhstan")
+st.markdown("### Interactive OpenStreetMap with regional data")
 
-# Load Kazakhstan GeoJSON
+# Regional data
 @st.cache_data
-def load_geojson():
-    # Alternative working URL
-    url = "https://raw.githubusercontent.com/deldersveld/topojson/master/countries/kazakhstan/kazakhstan-regions.json"
-    response = requests.get(url)
-    return response.json()
-
-# Sample data for regions
-@st.cache_data
-def load_region_data():
-    regions = {
-        'id': ['KZ-10', 'KZ-75', 'KZ-19', 'KZ-11', 'KZ-15', 'KZ-23', 'KZ-27', 
-               'KZ-31', 'KZ-33', 'KZ-35', 'KZ-39', 'KZ-43', 'KZ-47', 'KZ-55', 
-               'KZ-59', 'KZ-61', 'KZ-62', 'KZ-63', 'KZ-71', 'KZ-79'],
-        'name': ['Abai', 'Astana', 'Akmola', 'Aktobe', 'Almaty', 'Almaty Region',
-                 'Atyrau', 'East Kazakhstan', 'Jetisu', 'West Kazakhstan', 'Karaganda',
-                 'Kostanay', 'Kyzylorda', 'Mangystau', 'Pavlodar', 'North Kazakhstan',
-                 'Ulytau', 'Turkestan', 'Shymkent', 'Zhambyl'],
-        'cars': [120000, 280000, 180000, 210000, 450000, 480000,
-                 150000, 320000, 160000, 160000, 310000,
-                 200000, 190000, 170000, 180000, 130000, 
-                 90000, 450000, 240000, 260000],
-        'population': [450000, 1200000, 750000, 900000, 2000000, 2100000,
-                       650000, 1400000, 620000, 680000, 1380000,
-                       880000, 820000, 720000, 750000, 550000,
-                       280000, 2000000, 1100000, 1150000]
+def load_data():
+    data = {
+        'Region': ['Almaty City', 'Astana', 'Shymkent', 'Almaty Region', 'Akmola', 
+                   'Aktobe', 'Atyrau', 'East Kazakhstan', 'West Kazakhstan', 
+                   'Karaganda', 'Kostanay', 'Kyzylorda', 'Mangystau', 
+                   'Pavlodar', 'North Kazakhstan', 'Turkestan', 'Zhambyl'],
+        'Total Cars': [450000, 280000, 240000, 480000, 180000, 210000, 150000,
+                       320000, 160000, 310000, 200000, 190000, 170000,
+                       180000, 130000, 450000, 260000],
+        'Electric': [5000, 3500, 2000, 4000, 1500, 1800, 1200,
+                     2800, 1400, 2600, 1700, 1600, 1500,
+                     1550, 1100, 3800, 2200],
+        'Hybrid': [12000, 8000, 5000, 10000, 3000, 4000, 2500,
+                   7000, 3200, 6500, 4200, 3800, 3500,
+                   3700, 2600, 9500, 5500],
+        'Population': [2000000, 1200000, 1100000, 2100000, 750000, 900000, 650000,
+                       1400000, 680000, 1380000, 880000, 820000, 720000,
+                       750000, 550000, 2000000, 1150000],
+        'Latitude': [43.2220, 51.1694, 42.3000, 43.2567, 51.1801, 50.2839, 47.1164,
+                     49.9481, 51.2145, 49.8047, 53.2144, 44.8528, 44.5167,
+                     52.2873, 54.8667, 43.3000, 42.9000],
+        'Longitude': [76.8512, 71.4491, 69.6000, 76.9286, 71.4460, 57.1670, 51.8830,
+                      82.6278, 51.3572, 73.1094, 63.6246, 65.5089, 54.0167,
+                      76.9674, 69.1667, 68.2500, 71.3667]
     }
-    return pd.DataFrame(regions)
+    df = pd.DataFrame(data)
+    df['Cars per 1000'] = (df['Total Cars'] / df['Population'] * 1000).round(1)
+    return df
 
-try:
-    geojson = load_geojson()
-    df = load_region_data()
+df = load_data()
+
+# Sidebar
+st.sidebar.header("🎛️ Map Controls")
+
+map_style = st.sidebar.selectbox(
+    "Map Style",
+    ["OpenStreetMap", "CartoDB Positron", "CartoDB Dark Matter", "Stamen Terrain", "Stamen Toner"]
+)
+
+metric = st.sidebar.selectbox(
+    "Bubble Size Based On",
+    ["Total Cars", "Electric", "Hybrid", "Population", "Cars per 1000"]
+)
+
+show_heatmap = st.sidebar.checkbox("Show Heatmap Layer", value=False)
+
+# Map style mapping
+tile_mapping = {
+    "OpenStreetMap": "OpenStreetMap",
+    "CartoDB Positron": "CartoDB positron",
+    "CartoDB Dark Matter": "CartoDB dark_matter",
+    "Stamen Terrain": "Stamen Terrain",
+    "Stamen Toner": "Stamen Toner"
+}
+
+# Create base map
+m = folium.Map(
+    location=[48.0196, 66.9237],  # Center of Kazakhstan
+    zoom_start=5,
+    tiles=tile_mapping[map_style],
+    attr='Map data'
+)
+
+# Add markers with circles
+for idx, row in df.iterrows():
+    # Calculate bubble size based on metric
+    size_value = row[metric]
+    radius = (size_value / df[metric].max()) * 50000  # Scale radius
     
-    # Sidebar
-    st.sidebar.header("🎛️ Map Settings")
-    
-    metric_choice = st.sidebar.selectbox(
-        "Choose metric to display",
-        ["Number of Cars", "Population", "Cars per 1000 people"]
-    )
-    
-    color_scheme = st.sidebar.selectbox(
-        "Color Scheme",
-        ["Viridis", "Blues", "Reds", "Greens", "Plasma", "Turbo", "YlOrRd"]
-    )
-    
-    # Calculate metric
-    if metric_choice == "Cars per 1000 people":
-        df['metric'] = (df['cars'] / df['population'] * 1000).round(1)
-        metric_label = 'Cars per 1000 people'
-    elif metric_choice == "Population":
-        df['metric'] = df['population']
-        metric_label = 'Population'
+    # Color based on Cars per 1000
+    cars_per_capita = row['Cars per 1000']
+    if cars_per_capita > 250:
+        color = '#d73027'  # Red
+    elif cars_per_capita > 200:
+        color = '#fc8d59'  # Orange
+    elif cars_per_capita > 150:
+        color = '#fee08b'  # Yellow
     else:
-        df['metric'] = df['cars']
-        metric_label = 'Number of Cars'
+        color = '#91bfdb'  # Blue
     
-    # Create map
-    fig = px.choropleth(
-        df,
-        geojson=geojson,
-        locations='id',
-        featureidkey="properties.code",
-        color='metric',
-        color_continuous_scale=color_scheme,
-        hover_name='name',
-        hover_data={
-            'id': False,
-            'name': True,
-            'population': ':,',
-            'cars': ':,',
-            'metric': ':,.1f'
-        },
-        labels={'metric': metric_label},
-        title=f"Kazakhstan Regions - {metric_choice}"
-    )
+    # Create popup content
+    popup_html = f"""
+    <div style="font-family: Arial; width: 250px;">
+        <h4 style="margin-bottom: 10px; color: #2c3e50;">{row['Region']}</h4>
+        <hr style="margin: 5px 0;">
+        <p style="margin: 5px 0;"><b>🚗 Total Cars:</b> {row['Total Cars']:,}</p>
+        <p style="margin: 5px 0;"><b>⚡ Electric:</b> {row['Electric']:,}</p>
+        <p style="margin: 5px 0;"><b>🔋 Hybrid:</b> {row['Hybrid']:,}</p>
+        <p style="margin: 5px 0;"><b>👥 Population:</b> {row['Population']:,}</p>
+        <p style="margin: 5px 0;"><b>📊 Cars/1000:</b> {row['Cars per 1000']:.1f}</p>
+    </div>
+    """
     
-    fig.update_geos(
-        fitbounds="locations",
-        visible=False,
-        center={"lat": 48, "lon": 68}
-    )
+    # Add circle marker
+    folium.Circle(
+        location=[row['Latitude'], row['Longitude']],
+        radius=radius,
+        popup=folium.Popup(popup_html, max_width=300),
+        tooltip=f"<b>{row['Region']}</b><br>Cars: {row['Total Cars']:,}",
+        color=color,
+        fill=True,
+        fillColor=color,
+        fillOpacity=0.6,
+        weight=2
+    ).add_to(m)
     
-    fig.update_layout(
-        height=700,
-        margin={"r":0,"t":50,"l":0,"b":0}
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-except Exception as e:
-    st.error(f"Choropleth map failed: {str(e)}")
-    st.info("Showing alternative scatter map visualization...")
-    
-    # Fallback to scatter geo map
-    df = load_region_data()
-    
-    # Approximate coordinates for regions
-    coords = {
-        'Astana': (51.1694, 71.4491),
-        'Almaty': (43.2220, 76.8512),
-        'Shymkent': (42.3000, 69.6000),
-        'Akmola': (51.1801, 71.4460),
-        'Aktobe': (50.2839, 57.1670),
-        'Almaty Region': (43.2567, 76.9286),
-        'Atyrau': (47.1164, 51.8830),
-        'East Kazakhstan': (49.9481, 82.6278),
-        'West Kazakhstan': (51.2145, 51.3572),
-        'Karaganda': (49.8047, 73.1094),
-        'Kostanay': (53.2144, 63.6246),
-        'Kyzylorda': (44.8528, 65.5089),
-        'Mangystau': (44.5167, 54.0167),
-        'Pavlodar': (52.2873, 76.9674),
-        'North Kazakhstan': (54.8667, 69.1667),
-        'Turkestan': (43.3000, 68.2500),
-        'Zhambyl': (42.9000, 71.3667),
-        'Jetisu': (45.0167, 78.3667),
-        'Abai': (49.6500, 77.8667),
-        'Ulytau': (48.5667, 66.5667)
-    }
-    
-    df['lat'] = df['name'].map(lambda x: coords.get(x, (48, 68))[0])
-    df['lon'] = df['name'].map(lambda x: coords.get(x, (48, 68))[1])
-    
-    fig = px.scatter_geo(
-        df,
-        lat='lat',
-        lon='lon',
-        size='cars',
-        color='cars',
-        hover_name='name',
-        hover_data={
-            'cars': ':,',
-            'population': ':,',
-            'lat': False,
-            'lon': False
-        },
-        size_max=40,
-        color_continuous_scale='Viridis',
-        title='Kazakhstan Car Distribution by Region (Bubble Map)'
-    )
-    
-    fig.update_geos(
-        center=dict(lat=48, lon=68),
-        projection_scale=3.5,
-        visible=True,
-        resolution=50,
-        showcountries=True,
-        countrycolor="lightgray",
-        showland=True,
-        landcolor="lightgray"
-    )
-    
-    fig.update_layout(height=700)
-    
-    st.plotly_chart(fig, use_container_width=True)
+    # Add marker with icon
+    folium.Marker(
+        location=[row['Latitude'], row['Longitude']],
+        popup=folium.Popup(popup_html, max_width=300),
+        tooltip=row['Region'],
+        icon=folium.Icon(color='blue' if row['Total Cars'] < 300000 else 'red', icon='car', prefix='fa')
+    ).add_to(m)
+
+# Add heatmap if selected
+if show_heatmap:
+    from folium.plugins import HeatMap
+    heat_data = [[row['Latitude'], row['Longitude'], row['Total Cars']/10000] 
+                 for idx, row in df.iterrows()]
+    HeatMap(heat_data, radius=50, blur=40, max_zoom=13).add_to(m)
+
+# Add legend
+legend_html = """
+<div style="position: fixed; 
+     bottom: 50px; right: 50px; width: 200px; height: auto; 
+     background-color: white; z-index:9999; font-size:14px;
+     border:2px solid grey; border-radius: 5px; padding: 10px">
+     <p style="margin: 0; font-weight: bold;">Cars per 1000 people</p>
+     <p style="margin: 5px 0;"><span style="color: #d73027;">●</span> > 250</p>
+     <p style="margin: 5px 0;"><span style="color: #fc8d59;">●</span> 200-250</p>
+     <p style="margin: 5px 0;"><span style="color: #fee08b;">●</span> 150-200</p>
+     <p style="margin: 5px 0;"><span style="color: #91bfdb;">●</span> < 150</p>
+</div>
+"""
+m.get_root().html.add_child(folium.Element(legend_html))
+
+# Display map
+st_folium(m, width=1400, height=700)
 
 # Statistics
 st.markdown("---")
-st.markdown("### 📊 Regional Statistics")
+st.markdown("### 📊 Key Statistics")
 
-df = load_region_data()
-
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
-    st.metric("Total Population", f"{df['population'].sum():,}")
+    st.metric("Total Population", f"{df['Population'].sum():,}")
 
 with col2:
-    st.metric("Total Cars", f"{df['cars'].sum():,}")
+    st.metric("Total Cars", f"{df['Total Cars'].sum():,}")
 
 with col3:
-    st.metric("Average Cars/1000", f"{(df['cars'].sum() / df['population'].sum() * 1000):.1f}")
+    st.metric("Electric Cars", f"{df['Electric'].sum():,}")
 
 with col4:
-    st.metric("Number of Regions", len(df))
+    st.metric("Hybrid Cars", f"{df['Hybrid'].sum():,}")
 
-# Top regions
+with col5:
+    avg_cars = (df['Total Cars'].sum() / df['Population'].sum() * 1000)
+    st.metric("Avg Cars/1000", f"{avg_cars:.1f}")
+
+# Charts
 st.markdown("---")
-st.markdown("### 🏆 Top Regions by Number of Cars")
-
 col1, col2 = st.columns(2)
 
 with col1:
-    top_regions = df.nlargest(10, 'cars')[['name', 'cars', 'population']]
-    st.dataframe(
-        top_regions,
-        use_container_width=True,
-        column_config={
-            "name": "Region",
-            "cars": st.column_config.NumberColumn("Cars", format="%d"),
-            "population": st.column_config.NumberColumn("Population", format="%d"),
-        },
-        hide_index=True
-    )
+    st.markdown("#### 🏆 Top 10 Regions by Total Cars")
+    top_10 = df.nlargest(10, 'Total Cars')[['Region', 'Total Cars']]
+    st.bar_chart(top_10.set_index('Region'))
 
 with col2:
-    fig_bar = px.bar(
-        df.nlargest(10, 'cars'),
-        x='cars',
-        y='name',
-        orientation='h',
-        color='cars',
-        color_continuous_scale='Viridis',
-        labels={'cars': 'Number of Cars', 'name': 'Region'}
-    )
-    fig_bar.update_layout(showlegend=False, height=400)
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.markdown("#### ⚡ Green Vehicles Distribution")
+    green_df = df[['Region', 'Electric', 'Hybrid']].set_index('Region')
+    st.bar_chart(green_df)
 
 # Data table
 st.markdown("---")
-st.markdown("### 📋 Complete Regional Data")
+st.markdown("### 📋 Regional Data")
 
 st.dataframe(
-    df.sort_values('cars', ascending=False)[['name', 'cars', 'population']],
+    df[['Region', 'Total Cars', 'Electric', 'Hybrid', 'Population', 'Cars per 1000']].sort_values('Total Cars', ascending=False),
     use_container_width=True,
-    column_config={
-        "name": "Region Name",
-        "population": st.column_config.NumberColumn("Population", format="%d"),
-        "cars": st.column_config.NumberColumn("Number of Cars", format="%d"),
-    },
     hide_index=True
 )
 
-# Download
-csv = df.to_csv(index=False)
-st.download_button(
-    label="📥 Download Regional Data",
-    data=csv,
-    file_name="kazakhstan_regional_cars.csv",
-    mime="text/csv"
-)
-
 st.markdown("---")
-st.caption("🗺️ Sample Data for Demonstration | 📊 2023 Estimates")
+st.caption("🗺️ Powered by OpenStreetMap | 📊 Sample Data 2023")
